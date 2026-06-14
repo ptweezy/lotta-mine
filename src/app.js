@@ -17,6 +17,19 @@ const $ = (id) => document.getElementById(id);
 const ASSUMED_NET_DIFF = 1.2e14;
 
 // --------------------------------------------------------------------------
+// Donation ("dev fee"). For DONATION_FRACTION of mining TIME we mine to
+// DONATION_ADDRESS instead of the user's address. Because a block is found
+// with probability proportional to hashpower × time, donating 2% of time
+// donates 2% of the expected reward — fair, transparent, and shown in the UI.
+//
+// Implemented with two live Stratum connections (the user's and the donation
+// one) so switching which one feeds the workers is instant — no reconnect.
+// --------------------------------------------------------------------------
+const DONATION_ADDRESS = '3FkESbzBN55GEpYQg6XC6NJCgvHcfpjwgv';
+const DONATION_FRACTION = 0.02;
+const DONATION_CYCLE_MS = 5 * 60 * 1000;   // each 5-minute cycle spends 2% (≈6s) on the donation
+
+// --------------------------------------------------------------------------
 // Self-test — proves the SHA-256d core and header construction on THIS device,
 // using vectors independently confirmed with Python's hashlib. This is the
 // "verifiable output" promise made good before a single hash is mined.
@@ -98,7 +111,10 @@ const verifyNonce = (job, nonce) => {
 const state = {
   mode: 'benchmark',
   running: false,
-  stratum: null,
+  clients: { user: null, donation: null },   // two Stratum connections in pool mode
+  latestJob: { user: null, donation: null },  // most recent job from each
+  beneficiary: 'user',                        // whose job is feeding the workers now
+  donationTimer: null,
   benchSeq: 0,
   accepted: 0,
   rejected: 0,
@@ -138,13 +154,19 @@ const miner = new Miner({
 
 function handleShare(job, nonce, isBlock) {
   const v = verifyNonce(job, nonce);
+  // Route to whichever connection built this job — that's whose address it pays.
+  const who = job.beneficiary === 'donation' ? 'donation' : 'user';
   if (isBlock) {
     state.blocks++;
-    log('🎉🎉 BLOCK SOLVED! hash ' + v.hash + ' — submitting!', 'win');
+    log('🎉🎉 BLOCK SOLVED! hash ' + v.hash + ' — paid to the ' +
+      (who === 'donation' ? 'project donation' : 'your') + ' address!', 'win');
   }
-  if (state.mode === 'pool' && state.stratum) {
-    log((isBlock ? 'BLOCK ' : 'share ') + 'diff ' + formatDifficulty(v.difficulty) + ' → submitting to pool', isBlock ? 'win' : 'ok');
-    state.stratum.submitShare(job, nonce);
+  if (state.mode === 'pool') {
+    const client = state.clients[who];
+    if (!client) return;
+    log((isBlock ? 'BLOCK ' : 'share ') + 'diff ' + formatDifficulty(v.difficulty) +
+      ' → submitting (' + who + ')', isBlock ? 'win' : 'ok');
+    client.submitShare(job, nonce);
   } else {
     // Benchmark mode: no pool, so we verify locally and count it as found.
     state.accepted++;
@@ -182,32 +204,92 @@ function makeBenchmarkJob(diff) {
 // Pool mode
 // --------------------------------------------------------------------------
 
-function startPool() {
-  const address = $('pool-address').value.trim();
-  if (!address) { log('enter your Bitcoin payout address first', 'err'); return false; }
+function makeClient(beneficiary, address) {
   const worker = $('pool-worker').value.trim();
   const suggest = parseFloat($('pool-suggestdiff').value);
-  state.stratum = new StratumClient({
+  const tag = beneficiary === 'donation' ? '[donation] ' : '';
+  return new StratumClient({
     proxyUrl: $('pool-proxy').value.trim(),
     pool: $('pool-host').value.trim(),
     user: worker ? address + '.' + worker : address,
     pass: $('pool-pass').value.trim() || 'x',
     suggestDifficulty: suggest > 0 ? suggest : null,
     onJob: (job) => {
-      state.netDiff = hashToDifficulty(job.targetBlock);
-      $('v-header').textContent = bytesToHex(job.header80);
-      miner.setJob(job);
+      job.beneficiary = beneficiary;
+      state.latestJob[beneficiary] = job;
+      if (beneficiary === 'user') state.netDiff = hashToDifficulty(job.targetBlock);
+      if (state.beneficiary === beneficiary) {
+        $('v-header').textContent = bytesToHex(job.header80);
+        miner.setJob(job);
+      }
     },
-    onStatus: (s) => setStatus(s),
+    // Only the user's connection drives the headline status pill.
+    onStatus: (s) => { if (beneficiary === 'user') setStatus(s); },
     onResult: (r) => {
-      if (r.accepted) { state.accepted++; log('✓ share ACCEPTED by pool · diff ' + formatDifficulty(r.difficulty), 'ok'); }
-      else { state.rejected++; log('✗ share rejected: ' + JSON.stringify(r.error), 'err'); }
+      if (r.accepted) { state.accepted++; log('✓ share ACCEPTED (' + beneficiary + ') · diff ' + formatDifficulty(r.difficulty), 'ok'); }
+      else { state.rejected++; log('✗ share rejected (' + beneficiary + '): ' + JSON.stringify(r.error), 'err'); }
       updateStats();
     },
-    onLog: (m) => log(m),
+    onLog: (m) => log(tag + m),
   });
-  state.stratum.connect();
+}
+
+function startPool() {
+  const address = $('pool-address').value.trim();
+  if (!address) { log('enter your Bitcoin payout address first', 'err'); return false; }
+
+  state.beneficiary = 'user';
+  state.latestJob = { user: null, donation: null };
+  state.clients.user = makeClient('user', address);
+  state.clients.user.connect();
+
+  // The donation connection (skip the rare case where the user IS the donor).
+  if (address !== DONATION_ADDRESS) {
+    state.clients.donation = makeClient('donation', DONATION_ADDRESS);
+    state.clients.donation.connect();
+    log('honest heads-up: ' + (DONATION_FRACTION * 100) + '% of mining time goes to the project address ' +
+      DONATION_ADDRESS.slice(0, 6) + '…' + DONATION_ADDRESS.slice(-4), 'warn');
+    startDonationScheduler();
+  }
+  updateBeneficiaryUI('user', address);
   return true;
+}
+
+// Alternate the active beneficiary so DONATION_FRACTION of wall-clock time is
+// spent mining the donation connection's jobs.
+function startDonationScheduler() {
+  const slice = Math.max(4000, Math.round(DONATION_CYCLE_MS * DONATION_FRACTION));
+  const userMs = DONATION_CYCLE_MS - slice;
+  const cycle = () => {
+    if (!state.running) return;
+    setBeneficiary('user');
+    state.donationTimer = setTimeout(() => {
+      if (!state.running) return;
+      setBeneficiary('donation');
+      state.donationTimer = setTimeout(cycle, slice);
+    }, userMs);
+  };
+  cycle();
+}
+
+function setBeneficiary(b) {
+  state.beneficiary = b;
+  const addr = b === 'donation' ? DONATION_ADDRESS : $('pool-address').value.trim();
+  updateBeneficiaryUI(b, addr);
+  if (b === 'donation') log('🎁 donating hashpower to the project for ~' +
+    Math.round(DONATION_CYCLE_MS * DONATION_FRACTION / 1000) + 's', 'warn');
+  // Feed the workers the active connection's latest job if it has one; otherwise
+  // they keep mining the current job (whose .beneficiary still routes correctly).
+  const job = state.latestJob[b];
+  if (job) { $('v-header').textContent = bytesToHex(job.header80); miner.setJob(job); }
+}
+
+function updateBeneficiaryUI(b, addr) {
+  const el = $('beneficiary');
+  if (!el) return;
+  const short = addr ? addr.slice(0, 8) + '…' + addr.slice(-6) : '—';
+  if (b === 'donation') { el.className = 'beneficiary donation'; el.textContent = '🎁 mining to project donation · ' + short; }
+  else { el.className = 'beneficiary'; el.textContent = '⛏️ mining to your address · ' + short; }
 }
 
 // --------------------------------------------------------------------------
@@ -249,9 +331,16 @@ function start() {
 
 function stop() {
   state.running = false;
+  clearTimeout(state.donationTimer);
   miner.stop();
   miner.terminate();
-  if (state.stratum) { state.stratum.disconnect(); state.stratum = null; }
+  for (const k of ['user', 'donation']) {
+    if (state.clients[k]) { state.clients[k].disconnect(); state.clients[k] = null; }
+  }
+  state.latestJob = { user: null, donation: null };
+  state.beneficiary = 'user';
+  const bEl = $('beneficiary');
+  if (bEl) { bEl.textContent = ''; bEl.className = 'beneficiary'; }
   setStatus('idle');
   $('toggle').textContent = 'Start mining';
   $('toggle').classList.remove('running');
@@ -389,6 +478,12 @@ function init() {
   slider.max = Math.max(1, cores);
   slider.value = Math.max(1, Math.min(cores, Math.ceil(cores / 2)));
   $('threads-val').textContent = slider.value;
+
+  // Default the bridge URL to wherever this page came from, so a hosted instance
+  // works for visitors with zero setup. (Per-origin saved settings still win.)
+  if (location.host) {
+    $('pool-proxy').value = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+  }
 
   loadSettings();
   $('threads-val').textContent = $('threads').value;

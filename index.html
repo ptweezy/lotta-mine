@@ -20,6 +20,7 @@
       <div class="rate" id="hashrate">0 H/s</div>
       <div class="rate-label">hashrate · <span id="status-pill" class="pill idle">idle</span></div>
       <div class="odds" id="odds">Press start to estimate your odds.</div>
+      <div class="beneficiary" id="beneficiary"></div>
     </section>
 
     <section class="stats">
@@ -44,6 +45,7 @@
 
       <div class="panel hidden" id="panel-pool">
         <p class="hint">Connects to a real Stratum pool through a WebSocket bridge (see README). Solo/lottery pools pay the whole block reward to the finder.</p>
+        <p class="hint donate-note">💛 <strong>2% of mining time</strong> is donated to the project (address <code class="mono">3FkE…jwgv</code>) — shown live below the hashrate while it happens. The other 98% pays your address.</p>
         <label>Your Bitcoin payout address
           <input id="pool-address" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="bc1q… or 1… / 3…" />
         </label>
