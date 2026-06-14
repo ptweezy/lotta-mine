@@ -4,7 +4,7 @@ A **Bitcoin lottery miner that runs in a phone browser.** Open a page, tap start
 and your phone starts computing real SHA‑256d block-header hashes and (optionally)
 submitting them to a real mining pool over Stratum. The work is genuine and
 verifiable. The odds of winning are gloriously, cosmically bad — which is the
-whole point. It's a conversation piece, not an investment.
+whole point. It's a conversation piece....definitely not an investment. But maybe also a way to 'steal' power from your job?
 
 > A modern phone does on the order of **10⁶ hashes/second**. The Bitcoin network
 > does about **10²⁰**. At that rate, the expected time for a phone to solve a
