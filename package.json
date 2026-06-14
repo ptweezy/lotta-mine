@@ -1,0 +1,12 @@
+{
+  "name": "lotta-mine",
+  "version": "0.1.0",
+  "description": "A verifiable Bitcoin lottery miner for the browser (JS + Web Workers), with a Stratum-over-WebSocket bridge.",
+  "type": "module",
+  "scripts": {
+    "test": "node test/core.test.mjs",
+    "serve": "python3 proxy/stratum_proxy.py --serve ."
+  },
+  "license": "MIT",
+  "private": true
+}

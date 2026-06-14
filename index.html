@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d12" />
+  <title>lotta-mine · Bitcoin Lottery Miner</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>%E2%9B%8F%EF%B8%8F</text></svg>" />
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <h1>lotta&#8209;mine <span class="pick">⛏️</span></h1>
+      <p class="tagline">A Bitcoin lottery miner in your browser. The work is real; the odds are absurd.</p>
+      <div id="selftest" class="selftest pending" title="Cryptographic self-test">running self-test…</div>
+    </header>
+
+    <section class="rate-card">
+      <div class="rate" id="hashrate">0 H/s</div>
+      <div class="rate-label">hashrate · <span id="status-pill" class="pill idle">idle</span></div>
+      <div class="odds" id="odds">Press start to estimate your odds.</div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><div class="stat-val" id="stat-hashes">0</div><div class="stat-key">hashes tried</div></div>
+      <div class="stat"><div class="stat-val" id="stat-elapsed">0s</div><div class="stat-key">elapsed</div></div>
+      <div class="stat"><div class="stat-val" id="stat-best">—</div><div class="stat-key">best share (difficulty)</div></div>
+      <div class="stat"><div class="stat-val" id="stat-shares">0 / 0</div><div class="stat-key">shares acc / rej</div></div>
+    </section>
+
+    <section class="controls">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-mode="benchmark" role="tab">Benchmark</button>
+        <button class="tab" data-mode="pool" role="tab">Mine a Pool</button>
+      </div>
+
+      <div class="panel" id="panel-benchmark">
+        <p class="hint">No network needed. Mines a synthetic job so you can see — and verify — real SHA‑256d work and your phone's hashrate.</p>
+        <label>Demo share difficulty
+          <input id="bench-diff" type="number" min="0.0001" step="0.0001" value="0.01" inputmode="decimal" />
+        </label>
+      </div>
+
+      <div class="panel hidden" id="panel-pool">
+        <p class="hint">Connects to a real Stratum pool through a WebSocket bridge (see README). Solo/lottery pools pay the whole block reward to the finder.</p>
+        <label>Your Bitcoin payout address
+          <input id="pool-address" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="bc1q… or 1… / 3…" />
+        </label>
+        <label>Pool (host:port)
+          <input id="pool-host" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" value="solo.ckpool.org:3333" />
+        </label>
+        <label>WebSocket bridge URL
+          <input id="pool-proxy" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" value="ws://localhost:8080" />
+        </label>
+        <label>Request share difficulty <span class="muted">(optional)</span>
+          <input id="pool-suggestdiff" type="number" min="0.0001" step="1" inputmode="decimal" autocomplete="off" placeholder="blank = pool default · lower = shares land sooner" />
+        </label>
+        <p class="hint muted">Sends <code class="mono">mining.suggest_difficulty</code>. The pool may honor it or clamp to its own floor — watch the log for the “set share difficulty” it replies with. This changes how often you see <em>shares</em>, never your odds of a block. Some pools instead read difficulty from the password field (e.g. <code class="mono">d=1000</code>).</p>
+        <div class="row">
+          <label class="grow">Worker name
+            <input id="pool-worker" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" value="phone" />
+          </label>
+          <label class="grow">Password
+            <input id="pool-pass" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" value="x" />
+          </label>
+        </div>
+      </div>
+
+      <label class="intensity">Intensity · <span id="threads-val">1</span> thread(s)
+        <input id="threads" type="range" min="1" max="8" step="1" value="1" />
+      </label>
+
+      <button id="toggle" class="start">Start mining</button>
+    </section>
+
+    <section class="verify">
+      <details>
+        <summary>Verify the work <span class="muted">(don't trust — check)</span></summary>
+        <p class="hint">Everything below is recomputed in the page from first principles. Paste any value into a block explorer or your own SHA‑256d to confirm.</p>
+        <div class="kv"><span>current block header (80 bytes)</span><code id="v-header" class="mono break">—</code></div>
+        <div class="kv"><span>best hash found (display order)</span><code id="v-hash" class="mono break">—</code></div>
+        <div class="kv"><span>its nonce</span><code id="v-nonce" class="mono">—</code></div>
+        <button id="verify-btn" class="ghost">Re‑hash best & verify</button>
+        <div id="verify-out" class="verify-out"></div>
+      </details>
+    </section>
+
+    <section class="log-wrap">
+      <div class="log-head">activity</div>
+      <div id="log" class="log" aria-live="polite"></div>
+    </section>
+
+    <footer>
+      <p><strong>Reality check.</strong> A phone does ~10<sup>6</sup> hashes/sec; the Bitcoin network does ~10<sup>20</sup>. Your chance of finding a block is comparable to the proverbial monkey typing Shakespeare. That's the point — it's a conversation piece. Don't mine for money; mine to understand.</p>
+      <p class="muted">Open-source. No wallet access, no telemetry. Your address is only sent to the pool you choose.</p>
+    </footer>
+  </main>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
